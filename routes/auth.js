@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const db = require('../db/database');
 const { sendVerificationEmail } = require('../utils/mailer');
+const upload = require('../utils/upload');
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
@@ -13,35 +14,44 @@ function isValidEmail(email) {
   return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+function generatePassword() {
+  return crypto.randomBytes(4).toString('hex'); // 8 char password
+}
+
 // ---------- REGISTER ----------
-router.post('/register', async (req, res) => {
+router.post('/register', upload.single('paymentReceipt'), async (req, res) => {
   try {
     const { role } = req.body;
-
     if (!['college', 'personal'].includes(role)) {
       return res.status(400).json({ error: 'role must be "college" or "personal"' });
     }
 
+    const paymentReceipt = req.file ? req.file.filename : null;
+    if (!paymentReceipt) {
+      return res.status(400).json({ error: 'Payment receipt image is required' });
+    }
+
     if (role === 'personal') {
-      const { name, email, phone, password } = req.body;
-      if (!name || !isValidEmail(email) || !password) {
-        return res.status(400).json({ error: 'name, valid email, and password are required' });
+      const { name, email, phone, password, competitions } = req.body;
+      if (!name || !isValidEmail(email) || !password || !competitions) {
+        return res.status(400).json({ error: 'name, valid email, password, and competitions are required' });
       }
       if (password.length < 6) {
         return res.status(400).json({ error: 'password must be at least 6 characters' });
       }
 
-      const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-      if (existing) return res.status(409).json({ error: 'An account with this email already exists' });
+      const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+      const existingPart = db.prepare('SELECT id FROM participants WHERE email = ?').get(email);
+      if (existingUser || existingPart) return res.status(409).json({ error: 'An account with this email already exists' });
 
       const passwordHash = await bcrypt.hash(password, 10);
       const verifyToken = crypto.randomBytes(32).toString('hex');
       const expires = Date.now() + TOKEN_TTL_MS;
 
       const info = db.prepare(`
-        INSERT INTO users (role, name, email, phone, password_hash, verify_token, verify_token_expires)
-        VALUES ('personal', ?, ?, ?, ?, ?, ?)
-      `).run(name, email, phone || null, passwordHash, verifyToken, expires);
+        INSERT INTO users (role, name, email, phone, competitions, payment_receipt, password_hash, verify_token, verify_token_expires)
+        VALUES ('personal', ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(name, email, phone || null, competitions, paymentReceipt, passwordHash, verifyToken, expires);
 
       const verifyUrl = `${req.protocol}://${req.get('host')}/api/auth/verify/${verifyToken}`;
       const mailResult = await sendVerificationEmail(email, name, verifyUrl);
@@ -54,7 +64,13 @@ router.post('/register', async (req, res) => {
     }
 
     // role === 'college'
-    const { collegeName, adminName, email, phone, password, participants } = req.body;
+    const { collegeName, adminName, email, phone, password } = req.body;
+    let participants = [];
+    try {
+      participants = JSON.parse(req.body.participants || '[]');
+    } catch (e) {
+      return res.status(400).json({ error: 'Invalid participants data' });
+    }
 
     if (!collegeName || !adminName || !isValidEmail(email) || !password) {
       return res.status(400).json({ error: 'collegeName, adminName, valid email, and password are required' });
@@ -66,37 +82,51 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'At least one participant is required' });
     }
     for (const [i, p] of participants.entries()) {
-      if (!p.name || !isValidEmail(p.email)) {
-        return res.status(400).json({ error: `participant ${i + 1} needs a valid name and email` });
+      if (!p.name || !isValidEmail(p.email) || !p.competitions) {
+        return res.status(400).json({ error: `participant ${i + 1} needs a valid name, email, and competitions` });
       }
     }
 
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-    if (existing) return res.status(409).json({ error: 'An account with this email already exists' });
+    const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    if (existingUser) return res.status(409).json({ error: 'An account with this admin email already exists' });
 
     const passwordHash = await bcrypt.hash(password, 10);
     const verifyToken = crypto.randomBytes(32).toString('hex');
     const expires = Date.now() + TOKEN_TTL_MS;
 
     const insertUser = db.prepare(`
-      INSERT INTO users (role, name, email, phone, college_name, password_hash, verify_token, verify_token_expires)
-      VALUES ('college', ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO users (role, name, email, phone, college_name, payment_receipt, password_hash, verify_token, verify_token_expires)
+      VALUES ('college', ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertParticipant = db.prepare(`
-      INSERT INTO participants (college_user_id, name, email, phone, branch, year)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO participants (college_user_id, name, email, phone, branch, year, competitions, password_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
+    // Generate passwords for participants
+    const participantsWithPasswords = [];
+    for (let p of participants) {
+      const pPassword = generatePassword();
+      const pHash = await bcrypt.hash(pPassword, 10);
+      participantsWithPasswords.push({ ...p, password: pPassword, hash: pHash });
+    }
+
     const runAll = db.transaction(() => {
-      const info = insertUser.run(adminName, email, phone || null, collegeName, passwordHash, verifyToken, expires);
+      const info = insertUser.run(adminName, email, phone || null, collegeName, paymentReceipt, passwordHash, verifyToken, expires);
       const collegeUserId = info.lastInsertRowid;
-      for (const p of participants) {
-        insertParticipant.run(collegeUserId, p.name, p.email, p.phone || null, p.branch || null, p.year || null);
+      for (const p of participantsWithPasswords) {
+        insertParticipant.run(collegeUserId, p.name, p.email, p.phone || null, p.branch || null, p.year || null, p.competitions, p.hash);
       }
       return collegeUserId;
     });
 
     const userId = runAll();
+
+    // In a real app we'd send emails to all participants with their passwords here.
+    // We'll log them in devMode or simulate it.
+    for (const p of participantsWithPasswords) {
+        console.log(`[Email Mock] To: ${p.email} | Subject: Login Credentials | Content: Password is ${p.password}`);
+    }
 
     const verifyUrl = `${req.protocol}://${req.get('host')}/api/auth/verify/${verifyToken}`;
     const mailResult = await sendVerificationEmail(email, adminName, verifyUrl);
@@ -104,10 +134,13 @@ router.post('/register', async (req, res) => {
     return res.status(201).json({
       message: `College registered with ${participants.length} participant(s). Please check your email to verify your account.`,
       userId,
-      ...(mailResult.devMode ? { devVerifyUrl: verifyUrl } : {}),
+      ...(mailResult.devMode ? { devVerifyUrl: verifyUrl, generatedParticipantPasswords: participantsWithPasswords.map(p => ({email: p.email, password: p.password})) } : {}),
     });
   } catch (err) {
     console.error(err);
+    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+         return res.status(409).json({ error: 'A participant with this email already exists' });
+    }
     return res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
@@ -137,7 +170,7 @@ function renderMessagePage(message, success) {
   <style>body{font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;text-align:center;color:#222}
   .box{padding:24px;border-radius:8px;background:${success ? '#eafaf0' : '#fdecea'};border:1px solid ${success ? '#b7e4c7' : '#f5c2c0'}}
   a{color:#2b6cb0}</style></head>
-  <body><div class="box"><p>${message}</p>${success ? '<p><a href="/login.html">Go to login</a></p>' : ''}</div></body></html>`;
+  <body><div class="box"><p>${message}</p>${success ? '<p><a href="/">Go to login</a></p>' : ''}</div></body></html>`;
 }
 
 // ---------- LOGIN ----------
@@ -148,18 +181,30 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Valid email and password are required' });
     }
 
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    // Check users table
+    let user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    let isParticipant = false;
+
+    // Check participants table if not in users
+    if (!user) {
+       user = db.prepare('SELECT * FROM participants WHERE email = ?').get(email);
+       if (user) {
+           isParticipant = true;
+       }
+    }
+
     if (!user) return res.status(401).json({ error: 'Invalid email or password' });
 
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) return res.status(401).json({ error: 'Invalid email or password' });
 
-    if (!user.verified) {
+    if (!isParticipant && !user.verified) {
       return res.status(403).json({ error: 'Please verify your email before logging in' });
     }
 
+    const role = isParticipant ? 'participant' : user.role;
     const token = jwt.sign(
-      { id: user.id, role: user.role, email: user.email },
+      { id: user.id, role: role, email: user.email },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -176,8 +221,9 @@ router.post('/login', async (req, res) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role,
-        collegeName: user.college_name || null,
+        role: role,
+        competitions: user.competitions,
+        collegeName: user.college_name || null, // Only for role college
       },
     });
   } catch (err) {
@@ -198,14 +244,20 @@ router.get('/me', (req, res) => {
   if (!token) return res.status(401).json({ error: 'Not logged in' });
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    const user = db.prepare('SELECT id, role, name, email, college_name FROM users WHERE id = ?').get(payload.id);
-    if (!user) return res.status(401).json({ error: 'Not logged in' });
+    if (payload.role === 'participant') {
+       const user = db.prepare('SELECT id, name, email, competitions FROM participants WHERE id = ?').get(payload.id);
+       if (!user) return res.status(401).json({ error: 'Not logged in' });
+       return res.json({ user: { ...user, role: 'participant' }, participants: [] });
+    } else {
+       const user = db.prepare('SELECT id, role, name, email, college_name, competitions FROM users WHERE id = ?').get(payload.id);
+       if (!user) return res.status(401).json({ error: 'Not logged in' });
 
-    let participants = [];
-    if (user.role === 'college') {
-      participants = db.prepare('SELECT name, email, phone, branch, year FROM participants WHERE college_user_id = ?').all(user.id);
+       let participants = [];
+       if (user.role === 'college') {
+         participants = db.prepare('SELECT name, email, phone, branch, year, competitions FROM participants WHERE college_user_id = ?').all(user.id);
+       }
+       return res.json({ user, participants });
     }
-    return res.json({ user, participants });
   } catch {
     return res.status(401).json({ error: 'Session expired, please log in again' });
   }
