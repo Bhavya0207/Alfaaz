@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard - Alfaaz</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Welcome to Alfaaz</h1>
+  <div class="card" id="content">Loading...</div>
+  <p class="footer-link"><a href="#" onclick="logout()">Log out</a></p>
+
+<script>
+async function load() {
+  const res = await fetch('/api/auth/me');
+  const data = await res.json();
+  const el = document.getElementById('content');
+  if (!res.ok) {
+    el.innerHTML = 'You are not logged in. <a href="/login.html">Go to login</a>';
+    return;
+  }
+  let html = `<p><strong>${data.user.name}</strong> (${data.user.role})</p><p>${data.user.email}</p>`;
+  if (data.user.role === 'college') {
+    html += `<p>College: ${data.user.college_name}</p>`;
+    html += '<p><strong>Participants:</strong></p><ul>';
+    data.participants.forEach(p => { html += `<li>${p.name} — ${p.email}</li>`; });
+    html += '</ul>';
+  }
+  el.innerHTML = html;
+}
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login.html';
+}
+load();
+</script>
+</body>
+</html>

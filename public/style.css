@@ -1,0 +1,90 @@
+* { box-sizing: border-box; }
+body {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  max-width: 520px;
+  margin: 48px auto;
+  padding: 0 16px;
+  color: #1a1a1a;
+  background: #fafafa;
+}
+h1 { font-size: 1.5rem; margin-bottom: 4px; }
+.subtitle { color: #666; margin-top: 0; margin-bottom: 24px; }
+.card {
+  background: #fff;
+  border: 1px solid #e2e2e2;
+  border-radius: 8px;
+  padding: 24px;
+}
+label { display: block; margin: 14px 0 4px; font-size: 0.9rem; font-weight: 600; }
+input, select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 1rem;
+}
+.toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.toggle button {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid #ccc;
+  background: #f2f2f2;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.toggle button.active {
+  background: #2b6cb0;
+  color: #fff;
+  border-color: #2b6cb0;
+}
+button.primary {
+  width: 100%;
+  margin-top: 20px;
+  padding: 10px;
+  background: #2b6cb0;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+button.primary:hover { background: #245a92; }
+.participant-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  align-items: end;
+  margin-bottom: 8px;
+}
+.participant-row input { padding: 6px 8px; }
+.remove-btn {
+  background: #f5c2c0;
+  border: 1px solid #e0938f;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 6px 10px;
+}
+.add-btn {
+  margin-top: 4px;
+  background: #eee;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.msg {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+.msg.error { background: #fdecea; border: 1px solid #f5c2c0; color: #a12a22; }
+.msg.success { background: #eafaf0; border: 1px solid #b7e4c7; color: #256842; }
+.hidden { display: none; }
+.footer-link { text-align: center; margin-top: 16px; font-size: 0.9rem; }
+a { color: #2b6cb0; }

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login - Alfaaz</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Log in to Alfaaz</h1>
+  <p class="subtitle">Enter your verified account details</p>
+
+  <div class="card">
+    <form id="form-login">
+      <label>Email</label>
+      <input type="email" id="l-email" required>
+
+      <label>Password</label>
+      <input type="password" id="l-password" required>
+
+      <button type="submit" class="primary">Log In</button>
+    </form>
+    <div id="msg" class="msg hidden"></div>
+  </div>
+
+  <p class="footer-link">Don't have an account? <a href="/register.html">Register</a></p>
+
+<script>
+function showMsg(text, success) {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.className = 'msg ' + (success ? 'success' : 'error');
+  el.classList.remove('hidden');
+}
+
+document.getElementById('form-login').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    email: document.getElementById('l-email').value,
+    password: document.getElementById('l-password').value,
+  };
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showMsg(data.error || 'Login failed', false);
+      return;
+    }
+    showMsg('Login successful. Redirecting...', true);
+    setTimeout(() => window.location.href = '/dashboard.html', 800);
+  } catch (err) {
+    showMsg('Network error. Please try again.', false);
+  }
+});
+</script>
+</body>
+</html>
